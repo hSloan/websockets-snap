@@ -27,7 +27,8 @@ Library
     mtl           >= 2.1   && < 2.3,
     snap-core     >= 1.0   && < 1.1,
     snap-server   >= 1.0   && < 1.1,
-    websockets    >= 0.9.5 && < 0.10
+    websockets    >= 0.9.5 && < 0.10,
+    blaze-builder >= 0.4   && < 0.5
 
 Source-repository head
   Type:     git

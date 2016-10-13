@@ -10,23 +10,22 @@ module Network.WebSockets.Snap
 
 
 --------------------------------------------------------------------------------
-import           Control.Concurrent            (forkIO, myThreadId, threadDelay)
-import           Control.Exception             (Exception (..),
-                                                SomeException (..),
-                                                handle, throwTo)
-import           Control.Monad                 (forever)
-import           Data.ByteString               (ByteString)
-import qualified Data.ByteString.Builder       as BSBuilder
+import Control.Concurrent (forkIO, myThreadId, threadDelay)
+import Control.Concurrent.MVar
+import Control.Exception
+import Control.Monad (forever)
+import Data.ByteString (ByteString)
+import qualified Blaze.ByteString.Builder as Builder
+import qualified Data.ByteString.Builder as BSBuilder
 import qualified Data.ByteString.Builder.Extra as BSBuilder
-import qualified Data.ByteString.Char8         as BC
-import           Data.Typeable                 (Typeable, cast)
-import qualified Network.WebSockets            as WS
+import qualified Data.ByteString.Char8 as BC
+import Data.Typeable (Typeable, cast)
+import qualified Network.WebSockets as WS
 import qualified Network.WebSockets.Connection as WS
-import qualified Network.WebSockets.Stream     as WS
-import qualified Snap.Core                     as Snap
-import qualified Snap.Types.Headers            as Headers
-import qualified System.IO.Streams             as Streams
-
+import qualified Snap.Core as Snap
+import qualified Snap.Types.Headers as Headers
+import qualified System.IO.Streams as Streams
+import qualified System.IO.Streams.Attoparsec as Streams
 
 --------------------------------------------------------------------------------
 data Chunk
@@ -69,15 +68,31 @@ runWebSocketsSnapWith
 runWebSocketsSnapWith options app = do
   rq <- Snap.getRequest
   Snap.escapeHttp $ \tickle readEnd writeEnd -> do
-
     thisThread <- myThreadId
-    stream <- WS.makeStream (tickle (max 20) >> Streams.read readEnd)
-              (\v -> do
-                  Streams.write (fmap BSBuilder.lazyByteString v) writeEnd
-                  Streams.write (Just BSBuilder.flush) writeEnd
-              )
+    
+    curWrite <- newMVar $ \b -> do
+      Streams.write b writeEnd
 
-    let options' = options
+    let streamParse p = do
+          tickle (max 20)
+          r <- try (Streams.parseFromStream p readEnd)
+          case r of
+            Left (Streams.ParseException e) -> do
+              return Nothing
+            Right x -> return $ Just x
+
+        streamWrite v = do
+          withMVar curWrite $ \write -> do
+            write (Just (BSBuilder.lazyByteString
+                                    (Builder.toLazyByteString v)))
+            write (Just (BSBuilder.flush))
+
+        streamClose = do
+          write <- modifyMVar curWrite $ \write -> return (\_ -> throwIO WS.ConnectionClosed, write)
+          write Nothing
+          throwIO WS.ConnectionClosed
+
+        options' = options
                    { WS.connectionOnPong = do
                         tickle (max 30)
                         WS.connectionOnPong options
@@ -87,10 +102,11 @@ runWebSocketsSnapWith options app = do
                { WS.pendingOptions  = options'
                , WS.pendingRequest  = fromSnapRequest rq
                , WS.pendingOnAccept = forkPingThread tickle
-               , WS.pendingStream   = stream
+               , WS.pendingStreamParse = streamParse
+               , WS.pendingStreamWrite = streamWrite
+               , WS.pendingStreamClose = streamClose
                }
     app pc >> throwTo thisThread ServerAppDone
-
 
 --------------------------------------------------------------------------------
 -- | Start a ping thread in the background
