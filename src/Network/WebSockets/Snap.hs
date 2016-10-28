@@ -134,7 +134,9 @@ forkPingThread tickle unlessDone conn = do
         unlessDone pingThread
 
     ignore :: SomeException -> IO ()
-    ignore _   = return ()
+    ignore e = do
+      print e
+      return ()
 
 
 --------------------------------------------------------------------------------
