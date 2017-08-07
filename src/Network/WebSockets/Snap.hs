@@ -28,6 +28,7 @@ import qualified System.IO.Streams as Streams
 import qualified System.IO.Streams.Attoparsec as Streams
 import Data.IORef
 import Control.Monad.IO.Class
+import System.IO
 
 import Data.Monoid ((<>))
 
@@ -89,7 +90,7 @@ runWebSocketsSnapWith options app = do
           r <- try (Streams.parseFromStream p readEnd)
           case r of
             Left (Streams.ParseException e) -> do
-              putStrLn $ "Exception while parsing: " <> show e
+              hPutStrLn stderr $ "Exception while parsing: " <> show e
               return Nothing
             Right x -> do
               return $ Just x
